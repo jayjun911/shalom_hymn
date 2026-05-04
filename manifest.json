@@ -1,0 +1,16 @@
+{
+  "name": "통일찬송가 뷰어",
+  "short_name": "찬송가",
+  "description": "모바일용 통일찬송가 악보 뷰어",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#121212",
+  "theme_color": "#1a1a1a",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3257/3257404.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

@@ -1,0 +1,108 @@
+:root {
+    --bg-color: #ffffff;
+    --header-bg: rgba(255, 255, 255, 0.85);
+    --list-item-bg: #ffffff;
+    --text-primary: #1a1a1a;
+    --text-secondary: #666666;
+    --item-border: #f0f0f0;
+    --accent-color: #007bff;
+    --fav-color: #ff4757;
+    --search-bg: #f2f2f2;
+    --app-max-width: 500px;
+}
+
+body.dark-mode {
+    --bg-color: #121212;
+    --header-bg: rgba(30, 30, 30, 0.85);
+    --list-item-bg: #1e1e1e;
+    --text-primary: #e0e0e0;
+    --text-secondary: #999999;
+    --item-border: #2a2a2a;
+    --accent-color: #3498db;
+    --search-bg: #1e1e1e;
+}
+
+.glass { backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px); }
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+body {
+    margin: 0; padding: 0; background-color: #111; color: var(--text-primary);
+    font-family: 'Inter', 'Noto Sans KR', sans-serif;
+    height: 100dvh; overflow: hidden; display: flex; justify-content: center;
+    user-select: none; -webkit-user-select: none; touch-action: manipulation;
+}
+
+#app {
+    width: 100%; max-width: var(--app-max-width); height: 100dvh;
+    background-color: var(--bg-color); display: flex; flex-direction: column;
+    position: relative; box-shadow: 0 0 50px rgba(0,0,0,0.8);
+    overflow: hidden; /* 이 선을 넘는 자는 모두 사라지리라 */
+}
+
+/* 헤더 & 검색바 */
+.app-header { background: var(--header-bg); border-bottom: 1px solid var(--item-border); z-index: 100; flex-shrink: 0; padding-top: env(safe-area-inset-top); touch-action: none; }
+.top-row { height: 50px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; }
+#mainTitle { font-size: 1rem; font-weight: 700; flex: 1; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 5px; pointer-events: none; }
+.search-row { padding: 4px 15px 10px; }
+.search-container { display: flex; align-items: center; background: var(--search-bg); border-radius: 10px; padding: 0px 12px; gap: 8px; }
+#mainSearchInput { flex: 1; background: transparent; border: none; color: var(--text-primary); font-size: 16px; padding: 8px 0; outline: none; user-select: text; -webkit-user-select: text; }
+.lyrics-toggle { font-size: 10px; background: #444; color: #aaa; border: none; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+.lyrics-toggle.active { background: var(--accent-color); color: #fff; }
+
+.icon-btn, .footer-icon { background: transparent; border: none; color: var(--text-primary); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
+.icon-btn { opacity: 0.6; padding: 10px; }
+.icon-btn.active { color: var(--fav-color) !important; opacity: 1; }
+
+/* 목록 */
+.view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.list-container { flex: 1; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; background: var(--bg-color); }
+.hymn-item { padding: 20px; border-bottom: 1px solid var(--item-border); display: flex; flex-direction: column; gap: 4px; background-color: var(--list-item-bg); cursor: pointer; }
+.hymn-item .title { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+.hymn-item .lyrics-preview { font-size: 13px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 뷰어 & Stitching 된 악보 처리 */
+#viewerBody { flex: 1; height: 100%; overflow: hidden; background: #000; display: flex; flex-direction: column; }
+.score-container { flex: 1; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+#imageCanvas { flex: 1; height: 100%; background: white; width: 100%; display: flex; flex-direction: column; }
+
+/* 하나로 합쳐진 악보 스타일 */
+.stitched-score { width: 100%; height: auto; display: block; }
+
+/* 한 화면에 맞추는 모드 (단일 이미지이므로 매우 단순) */
+#imageCanvas.fit-screen {
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+}
+#imageCanvas.fit-screen .stitched-score {
+    width: 100%;
+    height: 100%;
+    object-fit: contain; /* 이제 이 한 줄이 두 장의 비례를 완벽히 맞춰줍니다. */
+}
+
+#imageCanvas:not(.fit-screen) { overflow-y: auto; }
+
+/* 푸터 */
+.viewer-footer { height: calc(60px + env(safe-area-inset-bottom)); display: flex; justify-content: space-around; align-items: flex-start; padding-top: 12px; padding-bottom: env(safe-area-inset-bottom); background: var(--header-bg); border-top: 1px solid var(--item-border); flex-shrink: 0; touch-action: none; }
+
+/* 기타 유지 */
+.transpose-card { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 280px; padding: 25px; background: rgba(40, 40, 40, 0.95); backdrop-filter: blur(25px); border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 25px 50px rgba(0,0,0,0.8); z-index: 150; text-align: center; }
+.sidebar { 
+    position: absolute; top: 0; left: 0; width: 280px; height: 100%; 
+    background: var(--header-bg); z-index: 200; 
+    transform: translateX(-100%); transition: all 0.3s ease; 
+    box-shadow: 10px 0 30px rgba(0,0,0,0.5); 
+    display: flex; flex-direction: column;
+    visibility: hidden; /* 평소에는 완전히 숨김 */
+}
+.sidebar.show { transform: translateX(0); visibility: visible; }
+.sidebar-inner { padding: calc(25px + env(safe-area-inset-top)) 20px 20px; flex: 1; display: flex; flex-direction: column; }
+#closeSettings { font-size: 16px; background: rgba(128,128,128,0.2); border: none; border-radius: 50%; width: 32px; height: 32px; color: var(--text-primary); cursor: pointer; }
+.overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.65); z-index: 120; }
+.hidden { display: none !important; }
+.switch { position: relative; display: inline-block; width: 42px; height: 22px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #444; transition: .4s; border-radius: 22px; }
+.slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%; }
+input:checked + .slider { background-color: #2ecc71; }
+.search-results { position: absolute; top: calc(105px + env(safe-area-inset-top)); left: 15px; right: 15px; background: var(--header-bg); border-radius: 12px; max-height: 60vh; overflow-y: auto; z-index: 101; border: 1px solid var(--item-border); box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
