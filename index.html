@@ -61,24 +61,17 @@
                 </div>
             </main>
 
-            <!-- 조바꿈 팝업 (중앙 정렬됨) -->
-            <div id="transposeControl" class="transpose-card hidden">
-                <h3>조바꿈 (Transpose)</h3>
-                <div class="t-controls">
-                    <button class="t-btn" data-dir="-1">-</button>
-                    <span id="transposeValue">0</span>
-                    <button class="t-btn" data-dir="1">+</button>
-                </div>
-                <button id="closeTranspose" class="t-close">닫기</button>
-            </div>
+            <!-- 조바꿈 팝업 (삭제됨 - 푸터로 이동) -->
 
             <footer class="viewer-footer">
                 <button id="prevBtn" class="footer-icon">
                     <svg viewBox="0 0 24 24" width="28" height="28"><path fill="currentColor" d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
                 </button>
-                <button id="transposeToggle" class="footer-icon">
-                    <svg viewBox="0 0 24 24" width="28" height="28"><path fill="currentColor" d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
-                </button>
+                <div class="footer-transpose">
+                    <button class="t-btn" data-dir="-1">-</button>
+                    <span id="transposeValue" class="current-key">G</span>
+                    <button class="t-btn" data-dir="1">+</button>
+                </div>
                 <button id="nextBtn" class="footer-icon">
                     <svg viewBox="0 0 24 24" width="28" height="28"><path fill="currentColor" d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
                 </button>

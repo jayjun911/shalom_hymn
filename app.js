@@ -13,7 +13,9 @@ document.addEventListener('DOMContentLoaded', () => {
         transpose: 0,
         oldToNewMap: {},
         newToOldMap: {},
-        chordsEnabled: true
+        chordsEnabled: true,
+        baseKey: 'C',
+        tempo: null
     };
 
     const CHORD_MAP = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
@@ -62,10 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
         prevBtn: document.getElementById('prevBtn'),
         nextBtn: document.getElementById('nextBtn'),
         viewerBody: document.getElementById('viewerBody'),
-        transposeToggle: document.getElementById('transposeToggle'),
-        transposePanel: document.getElementById('transposeControl'),
-        transposeValue: document.getElementById('transposeValue'),
-        closeTranspose: document.getElementById('closeTranspose')
+        transposeValue: document.getElementById('transposeValue')
     };
 
     const closeMenu = () => {
@@ -262,6 +261,13 @@ document.addEventListener('DOMContentLoaded', () => {
     async function openViewer(no, isPopState = false) {
         const hymn = window.hymnDb.hymns.find(h => h.no === no);
         if (!hymn) return;
+
+        // Reset transpose only when switching hymns (not on re-render from transpose btn)
+        if (!state.currentHymn || state.currentHymn.no !== no) {
+            state.transpose = 0;
+            if (UI.transposeValue) UI.transposeValue.textContent = '-';
+        }
+
         state.currentHymn = hymn;
         UI.imageCanvas.innerHTML = '<div style="padding:20px; text-align:center; color:#888;">악보를 준비 중입니다...</div>';
         
@@ -273,6 +279,28 @@ document.addEventListener('DOMContentLoaded', () => {
             imageUrls.push(`images/${baseNo}.gif`);
         }
 
+        // Lazy-load chord data from chords/NNN.json (cached)
+        if (!state.chordCache) state.chordCache = {};
+        if (state.chordCache[no] === undefined) {
+            try {
+                const res = await fetch(`chords/${baseNo}.json`);
+                state.chordCache[no] = res.ok ? await res.json() : null;
+            } catch {
+                state.chordCache[no] = null;
+            }
+        }
+        const chordData = state.chordCache[no]; // null if no chord file
+        
+        if (chordData) {
+            state.baseKey = chordData.key || 'C';
+            state.tempo = chordData.tempo || null;
+            if (UI.transposeValue) UI.transposeValue.textContent = transposeChord(state.baseKey, state.transpose);
+        } else {
+            state.baseKey = 'C';
+            state.tempo = null;
+            if (UI.transposeValue) UI.transposeValue.textContent = '-';
+        }
+
         try {
             const stitchedImg = await stitchImages(imageUrls);
             UI.imageCanvas.innerHTML = '';
@@ -280,23 +308,33 @@ document.addEventListener('DOMContentLoaded', () => {
             const wrapper = document.createElement('div');
             wrapper.className = 'score-wrapper';
             wrapper.style.position = 'relative';
-            wrapper.style.display = 'inline-block'; // Fit to image size
             wrapper.appendChild(stitchedImg);
 
-            // Overlay chords
-            if (state.chordsEnabled && hymn.chords) {
-                hymn.chords.forEach(c => {
+            // Overlay chords from lazy-loaded chordData
+            if (state.chordsEnabled && chordData && chordData.chords) {
+                const pageHeights = await Promise.all(imageUrls.map(url => new Promise(resolve => {
+                    const tmpImg = new Image();
+                    tmpImg.onload = () => resolve(tmpImg.naturalHeight);
+                    tmpImg.onerror = () => resolve(0);
+                    tmpImg.src = url;
+                })));
+
+                const totalH = pageHeights.reduce((a, b) => a + b, 0);
+                const pageOffsets = [0];
+                for (let i = 1; i < pageHeights.length; i++) {
+                    pageOffsets.push(pageOffsets[i-1] + (pageHeights[i-1] / totalH) * 100);
+                }
+
+                chordData.chords.forEach(c => {
                     const chordEl = document.createElement('div');
                     chordEl.className = 'chord-item';
-                    
-                    // If it's a stitched image, we need to calculate Y based on pages
-                    // For now, let's assume y is percentage of the whole stitched height
-                    // or relative to the page. 
-                    // Let's simplify: y is percentage of total height if p=1, 
-                    // but if pages > 1, we need to offset it.
-                    // However, for v1, let's just use y as % of total.
+
+                    const pageIdx = (c.p || 1) - 1;
+                    const pageHratio = totalH > 0 ? (pageHeights[pageIdx] / totalH) : 1;
+                    const absY = (pageOffsets[pageIdx] || 0) + c.y * pageHratio;
+
                     chordEl.style.left = c.x + '%';
-                    chordEl.style.top = c.y + '%';
+                    chordEl.style.top = absY + '%';
                     chordEl.textContent = transposeChord(c.t, state.transpose);
                     wrapper.appendChild(chordEl);
                 });
@@ -326,7 +364,6 @@ document.addEventListener('DOMContentLoaded', () => {
     function closeViewer() {
         UI.viewerView.classList.add('hidden');
         UI.homeView.classList.remove('hidden');
-        UI.transposePanel.classList.add('hidden');
         state.currentHymn = null;
         renderHymnList(); // 목록 초기화 (검색어 비워진 상태 반영)
         updateHeaderUI();
@@ -383,7 +420,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     UI.backBtn.addEventListener('click', () => {
-        history.back(); // 시스템 뒤로가기와 동일하게 동작 유도
+        closeViewer(); // 무조건 목록창으로 점프
     });
 
     function navigate(dir) {
@@ -405,9 +442,6 @@ document.addEventListener('DOMContentLoaded', () => {
     UI.closeSettings.addEventListener('click', closeMenu);
     UI.sidebarOverlay.addEventListener('click', closeMenu);
 
-    UI.transposeToggle.addEventListener('click', () => UI.transposePanel.classList.toggle('hidden'));
-    UI.closeTranspose.addEventListener('click', () => UI.transposePanel.classList.add('hidden'));
-
     // Transpose Buttons
     document.querySelectorAll('.t-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -416,8 +450,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (state.transpose > 6) state.transpose -= 12;
             if (state.transpose < -6) state.transpose += 12;
             
-            if (UI.transposeValue) {
-                UI.transposeValue.textContent = (state.transpose > 0 ? '+' : '') + state.transpose;
+            if (UI.transposeValue && state.baseKey) {
+                UI.transposeValue.textContent = transposeChord(state.baseKey, state.transpose);
             }
             if (state.currentHymn) openViewer(state.currentHymn.no, true);
         });
