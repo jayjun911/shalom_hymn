@@ -9,8 +9,36 @@ document.addEventListener('DOMContentLoaded', () => {
         darkMode: localStorage.getItem('darkMode') !== 'false',
         showFavsOnly: false,
         includeLyrics: false,
-        transpose: 0
+        isNewHymnMode: false,
+        transpose: 0,
+        oldToNewMap: {},
+        newToOldMap: {},
+        chordsEnabled: true
     };
+
+    const CHORD_MAP = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+
+    function transposeChord(chord, semitones) {
+        if (!chord || semitones === 0) return chord;
+        const match = chord.match(/^([A-G][#b]?)(.*)$/);
+        if (!match) return chord;
+
+        let root = match[1];
+        const suffix = match[2];
+
+        // Normalize root for lookup
+        if (root === 'Db') root = 'C#';
+        if (root === 'D#') root = 'Eb';
+        if (root === 'Gb') root = 'F#';
+        if (root === 'G#') root = 'Ab';
+        if (root === 'A#') root = 'Bb';
+
+        let index = CHORD_MAP.indexOf(root);
+        if (index === -1) return chord;
+
+        index = (index + semitones + 12) % 12;
+        return CHORD_MAP[index] + suffix;
+    }
 
     const UI = {
         homeView: document.getElementById('homeView'),
@@ -22,6 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
         universalFavBtn: document.getElementById('universalFavBtn'),
         mainSearchInput: document.getElementById('mainSearchInput'),
         searchRow: document.querySelector('.search-row'),
+        newHymnToggle: document.getElementById('newHymnToggle'),
         mainLyricsToggle: document.getElementById('mainLyricsToggle'),
         searchResults: document.getElementById('searchResults'),
         settingsSidebar: document.getElementById('settingsSidebar'),
@@ -45,11 +74,46 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     function init() {
-        applyDarkMode(state.darkMode);
-        UI.darkModeToggle.checked = state.darkMode;
-        renderHymnList();
-        updateHeaderUI();
-        updatePlaceholder();
+        try {
+            applyDarkMode(state.darkMode);
+            if (UI.darkModeToggle) UI.darkModeToggle.checked = state.darkMode;
+            
+            // 초기 렌더링
+            renderHymnList();
+            updateHeaderUI();
+            updatePlaceholder();
+            
+            // 인덱스 로딩 (백그라운드)
+            loadHymnIndex();
+        } catch (err) {
+            console.error('Init error:', err);
+        }
+    }
+
+    async function loadHymnIndex() {
+        try {
+            const res = await fetch('old_new_index/index.csv');
+            if (!res.ok) return;
+            const text = await res.text();
+            if (!text) return;
+
+            const lines = text.split(/\r?\n/);
+            lines.forEach((line) => {
+                if (!line.includes(',')) return;
+                const parts = line.split(',');
+                
+                const newNo = (parts[0] || "").replace(/[^\d]/g, '').trim();
+                const oldNo = (parts[1] || "").replace(/[^\d]/g, '').trim();
+                
+                if (newNo && oldNo) {
+                    state.newToOldMap[newNo] = oldNo;
+                    state.oldToNewMap[oldNo] = newNo;
+                }
+            });
+            console.log('Index loaded:', Object.keys(state.newToOldMap).length);
+        } catch (err) {
+            console.warn('Index load failed:', err);
+        }
     }
 
     function applyDarkMode(isDark) {
@@ -64,13 +128,27 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function updatePlaceholder() {
-        UI.mainSearchInput.placeholder = state.includeLyrics ? "번호, 제목, 가사 검색" : "번호, 제목 검색";
+        if (state.isNewHymnMode) {
+            UI.mainSearchInput.placeholder = "신찬송가 번호 검색";
+        } else {
+            UI.mainSearchInput.placeholder = state.includeLyrics ? "번호, 제목, 가사 검색" : "번호, 제목 검색";
+        }
     }
 
     function updateHeaderUI() {
         const isViewer = !UI.viewerView.classList.contains('hidden');
         if (isViewer && state.currentHymn) {
-            UI.mainTitle.textContent = `${state.currentHymn.no}장. ${state.currentHymn.title}`;
+            const oldNo = state.currentHymn.no;
+            const newNo = state.oldToNewMap[oldNo];
+            
+            let displayTitle;
+            if (state.isNewHymnMode && newNo) {
+                displayTitle = `신${newNo}장 ${state.currentHymn.title}`;
+            } else {
+                displayTitle = `${oldNo}장 ${state.currentHymn.title}`;
+            }
+            
+            UI.mainTitle.textContent = displayTitle;
             UI.menuBtn.classList.add('hidden');
             UI.backBtn.classList.remove('hidden');
             UI.universalFavBtn.classList.toggle('active', state.favorites.includes(state.currentHymn.no));
@@ -82,39 +160,79 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function handleSearch() {
+        const query = UI.mainSearchInput ? UI.mainSearchInput.value.trim() : "";
+        let filteredList = [];
+
+        if (state.isNewHymnMode) {
+            if (query === "") {
+                filteredList = window.hymnDb.hymns;
+            } else if (/^\d+$/.test(query)) {
+                const oldNo = state.newToOldMap[query];
+                filteredList = oldNo ? window.hymnDb.hymns.filter(h => h.no === parseInt(oldNo)) : [];
+            } else {
+                filteredList = [];
+            }
+        } else {
+            filteredList = query ? window.hymnDb.search(query, state.includeLyrics) : window.hymnDb.hymns;
+        }
+
+        if (UI.homeView && !UI.homeView.classList.contains('hidden')) {
+            renderHymnListWithData(filteredList);
+        } else if (UI.searchResults) {
+            if (!query) { UI.searchResults.classList.add('hidden'); return; }
+            
+            if (filteredList.length === 0) {
+                const msg = state.isNewHymnMode ? "구 찬송가에는 없는 곡입니다" : "검색 결과가 없습니다";
+                UI.searchResults.innerHTML = `<div class="no-results-msg" style="padding: 15px; font-size: 14px;">${msg}</div>`;
+                UI.searchResults.classList.remove('hidden');
+            } else {
+                UI.searchResults.innerHTML = filteredList.map(h => `
+                    <div class="result-item" data-no="${h.no}">
+                        <strong>${h.no}. ${h.title}</strong>
+                    </div>
+                `).join('');
+                UI.searchResults.classList.remove('hidden');
+            }
+        }
+    }
+
     function renderHymnList() {
-        const query = UI.mainSearchInput.value.trim();
-        let list = query ? window.hymnDb.search(query, state.includeLyrics) : window.hymnDb.hymns;
+        handleSearch();
+    }
+
+    function renderHymnListWithData(list) {
+        if (!list || !UI.hymnList) return;
         if (state.showFavsOnly) list = list.filter(h => state.favorites.includes(h.no));
+
+        const query = UI.mainSearchInput ? UI.mainSearchInput.value.trim() : "";
+        if (list.length === 0 && query !== '') {
+            const msg = state.isNewHymnMode ? "구 찬송가에는 없는 곡입니다" : "검색 결과가 없습니다";
+            UI.hymnList.innerHTML = `<div class="no-results-msg">${msg}</div>`;
+            return;
+        }
 
         UI.hymnList.innerHTML = list.map(h => `
             <div class="hymn-item" data-no="${h.no}">
                 <div class="title">${h.no}. ${h.title}</div>
-                <div class="lyrics-preview">${h.lyrics.substring(0, 50)}...</div>
+                <div class="lyrics-preview">${(h.lyrics || "").substring(0, 50)}...</div>
             </div>
         `).join('');
     }
 
-    function handleSearch() {
-        const query = UI.mainSearchInput.value.trim();
-        if (!UI.homeView.classList.contains('hidden')) {
-            renderHymnList();
-        } else {
-            if (!query) { UI.searchResults.classList.add('hidden'); return; }
-            const list = window.hymnDb.search(query, state.includeLyrics);
-            UI.searchResults.innerHTML = list.map(h => `
-                <div class="result-item" data-no="${h.no}">
-                    <strong>${h.no}. ${h.title}</strong>
-                </div>
-            `).join('');
-            UI.searchResults.classList.toggle('hidden', list.length === 0);
-        }
-    }
 
     UI.mainSearchInput.addEventListener('input', handleSearch);
     UI.mainLyricsToggle.addEventListener('click', () => {
         state.includeLyrics = !state.includeLyrics;
         UI.mainLyricsToggle.classList.toggle('active', state.includeLyrics);
+        updatePlaceholder();
+        handleSearch();
+    });
+
+    UI.newHymnToggle.addEventListener('click', () => {
+        state.isNewHymnMode = !state.isNewHymnMode;
+        UI.newHymnToggle.classList.toggle('active', state.isNewHymnMode);
+        UI.mainLyricsToggle.classList.toggle('hidden', state.isNewHymnMode); // 가사 토글 숨김
         updatePlaceholder();
         handleSearch();
     });
@@ -158,7 +276,33 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const stitchedImg = await stitchImages(imageUrls);
             UI.imageCanvas.innerHTML = '';
-            UI.imageCanvas.appendChild(stitchedImg);
+            
+            const wrapper = document.createElement('div');
+            wrapper.className = 'score-wrapper';
+            wrapper.style.position = 'relative';
+            wrapper.style.display = 'inline-block'; // Fit to image size
+            wrapper.appendChild(stitchedImg);
+
+            // Overlay chords
+            if (state.chordsEnabled && hymn.chords) {
+                hymn.chords.forEach(c => {
+                    const chordEl = document.createElement('div');
+                    chordEl.className = 'chord-item';
+                    
+                    // If it's a stitched image, we need to calculate Y based on pages
+                    // For now, let's assume y is percentage of the whole stitched height
+                    // or relative to the page. 
+                    // Let's simplify: y is percentage of total height if p=1, 
+                    // but if pages > 1, we need to offset it.
+                    // However, for v1, let's just use y as % of total.
+                    chordEl.style.left = c.x + '%';
+                    chordEl.style.top = c.y + '%';
+                    chordEl.textContent = transposeChord(c.t, state.transpose);
+                    wrapper.appendChild(chordEl);
+                });
+            }
+
+            UI.imageCanvas.appendChild(wrapper);
         } catch (err) {
             UI.imageCanvas.innerHTML = '<div style="padding:20px; text-align:center; color:#ff4757;">악보를 불러오지 못했습니다.</div>';
         }
@@ -263,6 +407,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     UI.transposeToggle.addEventListener('click', () => UI.transposePanel.classList.toggle('hidden'));
     UI.closeTranspose.addEventListener('click', () => UI.transposePanel.classList.add('hidden'));
+
+    // Transpose Buttons
+    document.querySelectorAll('.t-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const dir = parseInt(btn.dataset.dir);
+            state.transpose += dir;
+            if (state.transpose > 6) state.transpose -= 12;
+            if (state.transpose < -6) state.transpose += 12;
+            
+            if (UI.transposeValue) {
+                UI.transposeValue.textContent = (state.transpose > 0 ? '+' : '') + state.transpose;
+            }
+            if (state.currentHymn) openViewer(state.currentHymn.no, true);
+        });
+    });
 
     init();
 });

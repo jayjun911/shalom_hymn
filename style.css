@@ -46,8 +46,9 @@ body {
 .search-row { padding: 4px 15px 10px; }
 .search-container { display: flex; align-items: center; background: var(--search-bg); border-radius: 10px; padding: 0px 12px; gap: 8px; }
 #mainSearchInput { flex: 1; background: transparent; border: none; color: var(--text-primary); font-size: 16px; padding: 8px 0; outline: none; user-select: text; -webkit-user-select: text; }
-.lyrics-toggle { font-size: 10px; background: #444; color: #aaa; border: none; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
-.lyrics-toggle.active { background: var(--accent-color); color: #fff; }
+.lyrics-toggle { font-size: 11px; background: rgba(128,128,128,0.2); color: var(--text-secondary); border: none; padding: 5px 10px; border-radius: 8px; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+.lyrics-toggle.active { background: var(--accent-color); color: #fff; transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+#newHymnToggle.active { background: #e67e22; } /* 신 버튼은 오렌지색으로 구분 */
 
 .icon-btn, .footer-icon { background: transparent; border: none; color: var(--text-primary); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
 .icon-btn { opacity: 0.6; padding: 10px; }
@@ -169,3 +170,4 @@ input:checked + .slider:before { transform: translateX(20px); }
     padding: 15px 0;
 }
 .search-results { position: absolute; top: calc(105px + env(safe-area-inset-top)); left: 15px; right: 15px; background: var(--header-bg); border-radius: 12px; max-height: 60vh; overflow-y: auto; z-index: 101; border: 1px solid var(--item-border); box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+.no-results-msg { padding: 40px 20px; text-align: center; color: var(--text-secondary); font-size: 15px; }
