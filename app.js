@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
         backBtn: document.getElementById('backBtn'),
         universalFavBtn: document.getElementById('universalFavBtn'),
         mainSearchInput: document.getElementById('mainSearchInput'),
+        searchRow: document.querySelector('.search-row'),
         mainLyricsToggle: document.getElementById('mainLyricsToggle'),
         searchResults: document.getElementById('searchResults'),
         settingsSidebar: document.getElementById('settingsSidebar'),
@@ -122,8 +123,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const item = e.target.closest('.result-item');
         if (item) {
             openViewer(parseInt(item.dataset.no));
-            UI.mainSearchInput.value = '';
-            UI.searchResults.classList.add('hidden');
         }
     });
 
@@ -142,7 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- [핵심] 이미지 Stitching 로직 ---
-    async function openViewer(no) {
+    async function openViewer(no, isPopState = false) {
         const hymn = window.hymnDb.hymns.find(h => h.no === no);
         if (!hymn) return;
         state.currentHymn = hymn;
@@ -160,21 +159,43 @@ document.addEventListener('DOMContentLoaded', () => {
             const stitchedImg = await stitchImages(imageUrls);
             UI.imageCanvas.innerHTML = '';
             UI.imageCanvas.appendChild(stitchedImg);
-            
-            // 한 화면에 맞춰야 할 경우 클래스 부여
-            if (hymn.pages > 1) UI.imageCanvas.classList.add('fit-screen');
-            else UI.imageCanvas.classList.remove('fit-screen');
-
         } catch (err) {
             UI.imageCanvas.innerHTML = '<div style="padding:20px; text-align:center; color:#ff4757;">악보를 불러오지 못했습니다.</div>';
         }
 
+        // 히스토리 관리: 직접 열었을 때만 pushState (뒤로가기로 열린 게 아닐 때)
+        if (!isPopState && UI.viewerView.classList.contains('hidden')) {
+            history.pushState({ view: 'viewer', no: no }, '');
+        } else if (!isPopState) {
+            // 이미 뷰어 상태에서 다음/이전 이동 시에는 상태만 교체
+            history.replaceState({ view: 'viewer', no: no }, '');
+        }
+
         UI.homeView.classList.add('hidden');
         UI.viewerView.classList.remove('hidden');
-        UI.viewerBody.scrollTop = 0;
+        UI.imageCanvas.scrollTop = 0;
+        UI.mainSearchInput.value = '';
         UI.searchResults.classList.add('hidden');
         updateHeaderUI();
     }
+
+    function closeViewer() {
+        UI.viewerView.classList.add('hidden');
+        UI.homeView.classList.remove('hidden');
+        UI.transposePanel.classList.add('hidden');
+        state.currentHymn = null;
+        renderHymnList(); // 목록 초기화 (검색어 비워진 상태 반영)
+        updateHeaderUI();
+    }
+
+    // 뒤로가기(popstate) 이벤트 리스너
+    window.addEventListener('popstate', (e) => {
+        if (e.state && e.state.view === 'viewer') {
+            openViewer(e.state.no, true);
+        } else {
+            closeViewer();
+        }
+    });
 
     async function stitchImages(urls) {
         const images = await Promise.all(urls.map(url => {
@@ -186,7 +207,10 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }));
 
-        if (images.length === 1) return images[0];
+        if (images.length === 1) {
+            images[0].className = "stitched-score";
+            return images[0];
+        }
 
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
@@ -215,10 +239,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     UI.backBtn.addEventListener('click', () => {
-        UI.viewerView.classList.add('hidden');
-        UI.homeView.classList.remove('hidden');
-        UI.transposePanel.classList.add('hidden');
-        updateHeaderUI();
+        history.back(); // 시스템 뒤로가기와 동일하게 동작 유도
     });
 
     function navigate(dir) {

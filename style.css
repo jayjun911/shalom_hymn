@@ -60,27 +60,56 @@ body {
 .hymn-item .title { font-size: 16px; font-weight: 600; color: var(--text-primary); }
 .hymn-item .lyrics-preview { font-size: 13px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* 뷰어 & Stitching 된 악보 처리 */
-#viewerBody { flex: 1; height: 100%; overflow: hidden; background: #000; display: flex; flex-direction: column; }
-.score-container { flex: 1; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
-#imageCanvas { flex: 1; height: 100%; background: white; width: 100%; display: flex; flex-direction: column; }
+/* 뷰어 화면 레이아웃 최적화 */
+#viewerView {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
 
-/* 하나로 합쳐진 악보 스타일 */
-.stitched-score { width: 100%; height: auto; display: block; }
+#viewerBody {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    background: #ffffff;
+}
 
-/* 한 화면에 맞추는 모드 (단일 이미지이므로 매우 단순) */
-#imageCanvas.fit-screen {
+#scoreContainer {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    min-height: 0;
+    padding: 10px; /* 사방에 약간의 여백 */
+}
+
+#imageCanvas {
+    width: 100%;
+    height: 100%;
+    display: flex;
     justify-content: center;
     align-items: center;
     overflow: hidden;
 }
-#imageCanvas.fit-screen .stitched-score {
-    width: 100%;
-    height: 100%;
-    object-fit: contain; /* 이제 이 한 줄이 두 장의 비례를 완벽히 맞춰줍니다. */
+
+.stitched-score {
+    max-width: 100% !important;
+    max-height: 100% !important;
+    width: auto !important;
+    height: auto !important;
+    object-fit: contain;
+    display: block;
 }
 
-#imageCanvas:not(.fit-screen) { overflow-y: auto; }
+/* 푸터 고정 */
+.viewer-footer {
+    flex-shrink: 0;
+}
 
 /* 푸터 */
 .viewer-footer { height: calc(60px + env(safe-area-inset-bottom)); display: flex; justify-content: space-around; align-items: flex-start; padding-top: 12px; padding-bottom: env(safe-area-inset-bottom); background: var(--header-bg); border-top: 1px solid var(--item-border); flex-shrink: 0; touch-action: none; }
@@ -97,7 +126,6 @@ body {
 }
 .sidebar.show { transform: translateX(0); visibility: visible; }
 .sidebar-inner { padding: calc(25px + env(safe-area-inset-top)) 20px 20px; flex: 1; display: flex; flex-direction: column; }
-#closeSettings { font-size: 16px; background: rgba(128,128,128,0.2); border: none; border-radius: 50%; width: 32px; height: 32px; color: var(--text-primary); cursor: pointer; }
 .overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.65); z-index: 120; }
 .hidden { display: none !important; }
 .switch { position: relative; display: inline-block; width: 42px; height: 22px; }
@@ -105,4 +133,39 @@ body {
 .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #444; transition: .4s; border-radius: 22px; }
 .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%; }
 input:checked + .slider { background-color: #2ecc71; }
+input:checked + .slider:before { transform: translateX(20px); }
+
+/* 설정 사이드바 개선 */
+.sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--item-border);
+    margin-bottom: 20px;
+}
+.sidebar-header h2 { margin: 0; font-size: 1.2rem; font-weight: 700; }
+
+#closeSettings { 
+    background: transparent; 
+    border: none; 
+    color: var(--text-primary); 
+    cursor: pointer; 
+    padding: 8px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+    opacity: 0.7;
+}
+#closeSettings:hover { background: rgba(128, 128, 128, 0.1); opacity: 1; }
+#closeSettings svg { width: 24px; height: 24px; }
+
+.setting-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 0;
+}
 .search-results { position: absolute; top: calc(105px + env(safe-area-inset-top)); left: 15px; right: 15px; background: var(--header-bg); border-radius: 12px; max-height: 60vh; overflow-y: auto; z-index: 101; border: 1px solid var(--item-border); box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
