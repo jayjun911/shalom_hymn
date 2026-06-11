@@ -585,16 +585,17 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 100단위 빠른 스크롤 버튼 리스너
+    // 50단위 빠른 스크롤 슬라이딩 및 터치/드래그 제어
     const fastScrollIndex = document.querySelector('.fast-scroll-index');
     if (fastScrollIndex) {
-        fastScrollIndex.addEventListener('click', (e) => {
-            const item = e.target.closest('.index-item');
-            if (!item) return;
-            
-            const targetNo = parseInt(item.dataset.target);
+        let isDragging = false;
+        let lastTargetNo = null;
+        let startY = 0;
+        let hasMoved = false;
+        const dragThreshold = 5; // 드래그 판정 임계치 (px)
+
+        function scrollToTarget(targetNo, isSmooth = false) {
             const items = UI.hymnList.querySelectorAll('.hymn-item');
-            
             let foundElement = null;
             for (let hymnItem of items) {
                 const no = parseInt(hymnItem.dataset.no);
@@ -603,13 +604,116 @@ document.addEventListener('DOMContentLoaded', () => {
                     break;
                 }
             }
-            
             const listContainer = document.querySelector('.list-container');
             if (foundElement && listContainer) {
                 listContainer.scrollTo({
                     top: foundElement.offsetTop,
-                    behavior: 'smooth'
+                    behavior: isSmooth ? 'smooth' : 'auto'
                 });
+            }
+        }
+
+        function handleGesture(clientY, isSmooth = false) {
+            const rect = fastScrollIndex.getBoundingClientRect();
+            const relativeY = clientY - rect.top;
+            const items = Array.from(fastScrollIndex.querySelectorAll('.index-item'));
+            if (items.length === 0) return;
+            
+            // 인덱스 범위 클램핑 및 비례 계산
+            const index = Math.max(0, Math.min(items.length - 1, Math.floor((relativeY / rect.height) * items.length)));
+            
+            // 활성화된 인덱스 아이템 하이라이트
+            items.forEach((item, idx) => {
+                item.classList.toggle('active', idx === index);
+            });
+
+            const targetNo = parseInt(items[index].dataset.target);
+            if (targetNo !== lastTargetNo) {
+                lastTargetNo = targetNo;
+                scrollToTarget(targetNo, isSmooth);
+            }
+        }
+
+        function clearHighlight() {
+            const items = fastScrollIndex.querySelectorAll('.index-item');
+            items.forEach(item => item.classList.remove('active'));
+        }
+
+        // 터치 제어 (모바일 기기용)
+        fastScrollIndex.addEventListener('touchstart', (e) => {
+            isDragging = true;
+            hasMoved = false;
+            const touch = e.touches[0];
+            startY = touch.clientY;
+            handleGesture(touch.clientY, false);
+            e.preventDefault(); // 스크롤바 탭 시 전체 화면 스크롤링 및 풀-투-리프레시 오작동 차단
+        }, { passive: false });
+
+        fastScrollIndex.addEventListener('touchmove', (e) => {
+            if (!isDragging) return;
+            const touch = e.touches[0];
+            if (Math.abs(touch.clientY - startY) > dragThreshold) {
+                hasMoved = true;
+            }
+            handleGesture(touch.clientY, false);
+            e.preventDefault();
+        }, { passive: false });
+
+        fastScrollIndex.addEventListener('touchend', (e) => {
+            if (isDragging) {
+                isDragging = false;
+                lastTargetNo = null;
+                // 드래그가 일어나지 않은 단순 탭(터치)일 경우 부드러운 스크롤 제공
+                if (!hasMoved) {
+                    const touch = e.changedTouches[0];
+                    const rect = fastScrollIndex.getBoundingClientRect();
+                    const relativeY = touch.clientY - rect.top;
+                    const items = Array.from(fastScrollIndex.querySelectorAll('.index-item'));
+                    if (items.length > 0) {
+                        const index = Math.max(0, Math.min(items.length - 1, Math.floor((relativeY / rect.height) * items.length)));
+                        const targetNo = parseInt(items[index].dataset.target);
+                        scrollToTarget(targetNo, true);
+                    }
+                }
+                clearHighlight();
+            }
+        });
+
+        // 마우스 드래그 제어 (데스크톱 및 브라우저 에뮬레이터 테스트용)
+        fastScrollIndex.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            hasMoved = false;
+            startY = e.clientY;
+            handleGesture(e.clientY, false);
+            e.preventDefault();
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            if (Math.abs(e.clientY - startY) > dragThreshold) {
+                hasMoved = true;
+            }
+            handleGesture(e.clientY, false);
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                lastTargetNo = null;
+                clearHighlight();
+            }
+        });
+
+        // 클릭 리스너 (드래그하지 않고 단발적으로 마우스를 꾹 눌렀다 뗄 때 부드러운 스크롤 처리)
+        fastScrollIndex.addEventListener('click', (e) => {
+            if (hasMoved) {
+                e.preventDefault();
+                return;
+            }
+            const item = e.target.closest('.index-item');
+            if (item) {
+                const targetNo = parseInt(item.dataset.target);
+                scrollToTarget(targetNo, true);
             }
         });
     }

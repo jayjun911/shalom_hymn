@@ -267,10 +267,10 @@ body:not(.dark-mode) .fast-scroll-index {
     user-select: none;
     -webkit-user-select: none;
 }
-.index-item:hover, .index-item:active {
+.index-item:hover, .index-item:active, .index-item.active {
     background: var(--accent-color);
     color: #ffffff;
-    transform: scale(1.15);
+    transform: scale(1.25);
 }
 
 /* 메트로놈 레이아웃 컨테이너 */
