@@ -10,37 +10,18 @@ document.addEventListener('DOMContentLoaded', () => {
         showFavsOnly: false,
         includeLyrics: false,
         isNewHymnMode: false,
-        transpose: 0,
         oldToNewMap: {},
         newToOldMap: {},
         chordsEnabled: true,
         baseKey: 'C',
-        tempo: null
+        tempo: null,
+        displayMode: 'fit-width',
+        isPlayingMetro: false,
+        temposDb: {},
+        metroVisualEnabled: localStorage.getItem('metroVisual') !== 'false'
     };
 
-    const CHORD_MAP = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 
-    function transposeChord(chord, semitones) {
-        if (!chord || semitones === 0) return chord;
-        const match = chord.match(/^([A-G][#b]?)(.*)$/);
-        if (!match) return chord;
-
-        let root = match[1];
-        const suffix = match[2];
-
-        // Normalize root for lookup
-        if (root === 'Db') root = 'C#';
-        if (root === 'D#') root = 'Eb';
-        if (root === 'Gb') root = 'F#';
-        if (root === 'G#') root = 'Ab';
-        if (root === 'A#') root = 'Bb';
-
-        let index = CHORD_MAP.indexOf(root);
-        if (index === -1) return chord;
-
-        index = (index + semitones + 12) % 12;
-        return CHORD_MAP[index] + suffix;
-    }
 
     const UI = {
         homeView: document.getElementById('homeView'),
@@ -64,7 +45,8 @@ document.addEventListener('DOMContentLoaded', () => {
         prevBtn: document.getElementById('prevBtn'),
         nextBtn: document.getElementById('nextBtn'),
         viewerBody: document.getElementById('viewerBody'),
-        transposeValue: document.getElementById('transposeValue')
+        metroBtn: document.getElementById('metroBtn'),
+        metroVisualToggle: document.getElementById('metroVisualToggle')
     };
 
     const closeMenu = () => {
@@ -76,6 +58,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             applyDarkMode(state.darkMode);
             if (UI.darkModeToggle) UI.darkModeToggle.checked = state.darkMode;
+            if (UI.metroVisualToggle) UI.metroVisualToggle.checked = state.metroVisualEnabled;
             
             // 초기 렌더링
             renderHymnList();
@@ -84,8 +67,22 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // 인덱스 로딩 (백그라운드)
             loadHymnIndex();
+            // 템포 로딩 (백그라운드)
+            loadTempos();
         } catch (err) {
             console.error('Init error:', err);
+        }
+    }
+
+    async function loadTempos() {
+        try {
+            const res = await fetch('tempos.json');
+            if (res.ok) {
+                state.temposDb = await res.json();
+                console.log('Tempos loaded:', Object.keys(state.temposDb).length);
+            }
+        } catch (err) {
+            console.warn('Failed to load tempos.json:', err);
         }
     }
 
@@ -262,11 +259,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const hymn = window.hymnDb.hymns.find(h => h.no === no);
         if (!hymn) return;
 
-        // Reset transpose only when switching hymns (not on re-render from transpose btn)
-        if (!state.currentHymn || state.currentHymn.no !== no) {
-            state.transpose = 0;
-            if (UI.transposeValue) UI.transposeValue.textContent = '-';
-        }
+        // 메트로놈 정지 및 초기화
+        stopMetronome();
 
         state.currentHymn = hymn;
         UI.imageCanvas.innerHTML = '<div style="padding:20px; text-align:center; color:#888;">악보를 준비 중입니다...</div>';
@@ -291,14 +285,35 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const chordData = state.chordCache[no]; // null if no chord file
         
+        let finalTempo = null;
+        if (chordData && chordData.tempo) {
+            finalTempo = chordData.tempo;
+        } else if (state.temposDb && state.temposDb[baseNo]) {
+            finalTempo = state.temposDb[baseNo];
+        }
+        
+        state.tempo = finalTempo || null; // 스캔된 템포가 없으면 null 지정
+        
+        // 메트로놈 버튼 상태 및 템포 표시 업데이트
+        const metroBpmText = document.getElementById('metroBpmText');
+        if (UI.metroBtn) {
+            if (state.tempo) {
+                UI.metroBtn.disabled = false;
+                if (metroBpmText) {
+                    metroBpmText.textContent = `: ${state.tempo}`;
+                }
+            } else {
+                UI.metroBtn.disabled = true;
+                if (metroBpmText) {
+                    metroBpmText.textContent = `: -`;
+                }
+            }
+        }
+        
         if (chordData) {
             state.baseKey = chordData.key || 'C';
-            state.tempo = chordData.tempo || null;
-            if (UI.transposeValue) UI.transposeValue.textContent = transposeChord(state.baseKey, state.transpose);
         } else {
             state.baseKey = 'C';
-            state.tempo = null;
-            if (UI.transposeValue) UI.transposeValue.textContent = '-';
         }
 
         try {
@@ -335,7 +350,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     chordEl.style.left = c.x + '%';
                     chordEl.style.top = absY + '%';
-                    chordEl.textContent = transposeChord(c.t, state.transpose);
+                    chordEl.textContent = c.t;
                     wrapper.appendChild(chordEl);
                 });
             }
@@ -355,6 +370,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         UI.homeView.classList.add('hidden');
         UI.viewerView.classList.remove('hidden');
+        UI.viewerView.classList.toggle('fit-entire', state.displayMode === 'fit-entire');
         UI.imageCanvas.scrollTop = 0;
         UI.mainSearchInput.value = '';
         UI.searchResults.classList.add('hidden');
@@ -362,6 +378,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function closeViewer() {
+        stopMetronome(); // 뷰어를 닫을 때 메트로놈 중지
         UI.viewerView.classList.add('hidden');
         UI.homeView.classList.remove('hidden');
         state.currentHymn = null;
@@ -442,20 +459,160 @@ document.addEventListener('DOMContentLoaded', () => {
     UI.closeSettings.addEventListener('click', closeMenu);
     UI.sidebarOverlay.addEventListener('click', closeMenu);
 
-    // Transpose Buttons
-    document.querySelectorAll('.t-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const dir = parseInt(btn.dataset.dir);
-            state.transpose += dir;
-            if (state.transpose > 6) state.transpose -= 12;
-            if (state.transpose < -6) state.transpose += 12;
-            
-            if (UI.transposeValue && state.baseKey) {
-                UI.transposeValue.textContent = transposeChord(state.baseKey, state.transpose);
-            }
-            if (state.currentHymn) openViewer(state.currentHymn.no, true);
-        });
+    // Double-tap to toggle display mode (Fit Width / Fit Entire Score)
+    let lastTap = 0;
+    UI.imageCanvas.addEventListener('click', (e) => {
+        const currentTime = new Date().getTime();
+        const tapLength = currentTime - lastTap;
+        if (tapLength < 300 && tapLength > 0) {
+            e.preventDefault();
+            state.displayMode = state.displayMode === 'fit-width' ? 'fit-entire' : 'fit-width';
+            UI.viewerView.classList.toggle('fit-entire', state.displayMode === 'fit-entire');
+        }
+        lastTap = currentTime;
     });
+
+
+
+    // 메트로놈 오디오 및 제어 로직
+    let audioCtx = null;
+    let metroIntervalId = null;
+    let nextTickTime = 0.0;
+    const clickLength = 0.04; // seconds (crisp click)
+
+    function startMetronome() {
+        if (state.isPlayingMetro) return;
+        if (!state.tempo) return; // 템포 값이 없으면 실행하지 않음
+        
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+        
+        state.isPlayingMetro = true;
+        if (UI.metroBtn) UI.metroBtn.classList.add('active');
+        nextTickTime = audioCtx.currentTime;
+        
+        scheduler();
+    }
+
+    function stopMetronome() {
+        state.isPlayingMetro = false;
+        if (UI.metroBtn) {
+            UI.metroBtn.classList.remove('active');
+            UI.metroBtn.classList.remove('flash');
+        }
+        if (metroIntervalId) {
+            clearTimeout(metroIntervalId);
+            metroIntervalId = null;
+        }
+    }
+
+    function scheduler() {
+        if (!state.isPlayingMetro) return;
+        while (nextTickTime < audioCtx.currentTime + 0.1) {
+            scheduleClick(nextTickTime);
+            const secondsPerBeat = 60.0 / state.tempo;
+            nextTickTime += secondsPerBeat;
+        }
+        metroIntervalId = setTimeout(scheduler, 25);
+    }
+
+    function scheduleClick(time) {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        
+        osc.frequency.value = 1000; // 1000Hz 맑은 하이 톤
+        
+        gainNode.gain.setValueAtTime(1, time);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, time + clickLength);
+        
+        osc.start(time);
+        osc.stop(time + clickLength);
+
+        // 녹색 LED 깜빡임 및 테두리 반짝임 동기화 (오디오 재생 시점 예측 지연 계산)
+        const delayMs = (time - audioCtx.currentTime) * 1000;
+        setTimeout(() => {
+            if (!state.isPlayingMetro) return;
+            
+            // LED 깜빡임
+            if (UI.metroBtn) {
+                UI.metroBtn.classList.add('flash');
+                setTimeout(() => {
+                    if (state.isPlayingMetro && UI.metroBtn) {
+                        UI.metroBtn.classList.remove('flash');
+                    }
+                }, 40);
+            }
+            
+            // 화면 테두리 반짝임 (비주얼 큐 활성화 시)
+            if (state.metroVisualEnabled) {
+                const appContainer = document.getElementById('app');
+                if (appContainer) {
+                    appContainer.classList.add('metro-beat-flash');
+                    setTimeout(() => {
+                        if (appContainer) {
+                            appContainer.classList.remove('metro-beat-flash');
+                        }
+                    }, 40);
+                }
+            }
+        }, Math.max(0, delayMs));
+    }
+
+    // 메트로놈 토글 버튼 리스너
+    if (UI.metroBtn) {
+        UI.metroBtn.addEventListener('click', () => {
+            if (state.isPlayingMetro) {
+                stopMetronome();
+            } else {
+                startMetronome();
+            }
+        });
+    }
+
+    // 메트로놈 비주얼 큐 설정 변경 리스너
+    if (UI.metroVisualToggle) {
+        UI.metroVisualToggle.addEventListener('change', (e) => {
+            state.metroVisualEnabled = e.target.checked;
+            localStorage.setItem('metroVisual', state.metroVisualEnabled);
+        });
+    }
+
+    // 100단위 빠른 스크롤 버튼 리스너
+    const fastScrollIndex = document.querySelector('.fast-scroll-index');
+    if (fastScrollIndex) {
+        fastScrollIndex.addEventListener('click', (e) => {
+            const item = e.target.closest('.index-item');
+            if (!item) return;
+            
+            const targetNo = parseInt(item.dataset.target);
+            const items = UI.hymnList.querySelectorAll('.hymn-item');
+            
+            let foundElement = null;
+            for (let hymnItem of items) {
+                const no = parseInt(hymnItem.dataset.no);
+                if (no >= targetNo) {
+                    foundElement = hymnItem;
+                    break;
+                }
+            }
+            
+            const listContainer = document.querySelector('.list-container');
+            if (foundElement && listContainer) {
+                listContainer.scrollTo({
+                    top: foundElement.offsetTop,
+                    behavior: 'smooth'
+                });
+            }
+        });
+    }
 
     init();
 });
