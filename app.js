@@ -10,35 +10,18 @@ document.addEventListener('DOMContentLoaded', () => {
         showFavsOnly: false,
         includeLyrics: false,
         isNewHymnMode: false,
-        transpose: 0,
         oldToNewMap: {},
         newToOldMap: {},
-        chordsEnabled: true
+        chordsEnabled: true,
+        baseKey: 'C',
+        tempo: null,
+        displayMode: 'fit-width',
+        isPlayingMetro: false,
+        temposDb: {},
+        metroVisualEnabled: localStorage.getItem('metroVisual') !== 'false'
     };
 
-    const CHORD_MAP = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 
-    function transposeChord(chord, semitones) {
-        if (!chord || semitones === 0) return chord;
-        const match = chord.match(/^([A-G][#b]?)(.*)$/);
-        if (!match) return chord;
-
-        let root = match[1];
-        const suffix = match[2];
-
-        // Normalize root for lookup
-        if (root === 'Db') root = 'C#';
-        if (root === 'D#') root = 'Eb';
-        if (root === 'Gb') root = 'F#';
-        if (root === 'G#') root = 'Ab';
-        if (root === 'A#') root = 'Bb';
-
-        let index = CHORD_MAP.indexOf(root);
-        if (index === -1) return chord;
-
-        index = (index + semitones + 12) % 12;
-        return CHORD_MAP[index] + suffix;
-    }
 
     const UI = {
         homeView: document.getElementById('homeView'),
@@ -62,10 +45,8 @@ document.addEventListener('DOMContentLoaded', () => {
         prevBtn: document.getElementById('prevBtn'),
         nextBtn: document.getElementById('nextBtn'),
         viewerBody: document.getElementById('viewerBody'),
-        transposeToggle: document.getElementById('transposeToggle'),
-        transposePanel: document.getElementById('transposeControl'),
-        transposeValue: document.getElementById('transposeValue'),
-        closeTranspose: document.getElementById('closeTranspose')
+        metroBtn: document.getElementById('metroBtn'),
+        metroVisualToggle: document.getElementById('metroVisualToggle')
     };
 
     const closeMenu = () => {
@@ -77,6 +58,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             applyDarkMode(state.darkMode);
             if (UI.darkModeToggle) UI.darkModeToggle.checked = state.darkMode;
+            if (UI.metroVisualToggle) UI.metroVisualToggle.checked = state.metroVisualEnabled;
             
             // 초기 렌더링
             renderHymnList();
@@ -85,8 +67,22 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // 인덱스 로딩 (백그라운드)
             loadHymnIndex();
+            // 템포 로딩 (백그라운드)
+            loadTempos();
         } catch (err) {
             console.error('Init error:', err);
+        }
+    }
+
+    async function loadTempos() {
+        try {
+            const res = await fetch('tempos.json');
+            if (res.ok) {
+                state.temposDb = await res.json();
+                console.log('Tempos loaded:', Object.keys(state.temposDb).length);
+            }
+        } catch (err) {
+            console.warn('Failed to load tempos.json:', err);
         }
     }
 
@@ -262,6 +258,10 @@ document.addEventListener('DOMContentLoaded', () => {
     async function openViewer(no, isPopState = false) {
         const hymn = window.hymnDb.hymns.find(h => h.no === no);
         if (!hymn) return;
+
+        // 메트로놈 정지 및 초기화
+        stopMetronome();
+
         state.currentHymn = hymn;
         UI.imageCanvas.innerHTML = '<div style="padding:20px; text-align:center; color:#888;">악보를 준비 중입니다...</div>';
         
@@ -273,6 +273,49 @@ document.addEventListener('DOMContentLoaded', () => {
             imageUrls.push(`images/${baseNo}.gif`);
         }
 
+        // Lazy-load chord data from chords/NNN.json (cached)
+        if (!state.chordCache) state.chordCache = {};
+        if (state.chordCache[no] === undefined) {
+            try {
+                const res = await fetch(`chords/${baseNo}.json`);
+                state.chordCache[no] = res.ok ? await res.json() : null;
+            } catch {
+                state.chordCache[no] = null;
+            }
+        }
+        const chordData = state.chordCache[no]; // null if no chord file
+        
+        let finalTempo = null;
+        if (chordData && chordData.tempo) {
+            finalTempo = chordData.tempo;
+        } else if (state.temposDb && state.temposDb[baseNo]) {
+            finalTempo = state.temposDb[baseNo];
+        }
+        
+        state.tempo = finalTempo || null; // 스캔된 템포가 없으면 null 지정
+        
+        // 메트로놈 버튼 상태 및 템포 표시 업데이트
+        const metroBpmText = document.getElementById('metroBpmText');
+        if (UI.metroBtn) {
+            if (state.tempo) {
+                UI.metroBtn.disabled = false;
+                if (metroBpmText) {
+                    metroBpmText.textContent = `: ${state.tempo}`;
+                }
+            } else {
+                UI.metroBtn.disabled = true;
+                if (metroBpmText) {
+                    metroBpmText.textContent = `: -`;
+                }
+            }
+        }
+        
+        if (chordData) {
+            state.baseKey = chordData.key || 'C';
+        } else {
+            state.baseKey = 'C';
+        }
+
         try {
             const stitchedImg = await stitchImages(imageUrls);
             UI.imageCanvas.innerHTML = '';
@@ -280,24 +323,34 @@ document.addEventListener('DOMContentLoaded', () => {
             const wrapper = document.createElement('div');
             wrapper.className = 'score-wrapper';
             wrapper.style.position = 'relative';
-            wrapper.style.display = 'inline-block'; // Fit to image size
             wrapper.appendChild(stitchedImg);
 
-            // Overlay chords
-            if (state.chordsEnabled && hymn.chords) {
-                hymn.chords.forEach(c => {
+            // Overlay chords from lazy-loaded chordData
+            if (state.chordsEnabled && chordData && chordData.chords) {
+                const pageHeights = await Promise.all(imageUrls.map(url => new Promise(resolve => {
+                    const tmpImg = new Image();
+                    tmpImg.onload = () => resolve(tmpImg.naturalHeight);
+                    tmpImg.onerror = () => resolve(0);
+                    tmpImg.src = url;
+                })));
+
+                const totalH = pageHeights.reduce((a, b) => a + b, 0);
+                const pageOffsets = [0];
+                for (let i = 1; i < pageHeights.length; i++) {
+                    pageOffsets.push(pageOffsets[i-1] + (pageHeights[i-1] / totalH) * 100);
+                }
+
+                chordData.chords.forEach(c => {
                     const chordEl = document.createElement('div');
                     chordEl.className = 'chord-item';
-                    
-                    // If it's a stitched image, we need to calculate Y based on pages
-                    // For now, let's assume y is percentage of the whole stitched height
-                    // or relative to the page. 
-                    // Let's simplify: y is percentage of total height if p=1, 
-                    // but if pages > 1, we need to offset it.
-                    // However, for v1, let's just use y as % of total.
+
+                    const pageIdx = (c.p || 1) - 1;
+                    const pageHratio = totalH > 0 ? (pageHeights[pageIdx] / totalH) : 1;
+                    const absY = (pageOffsets[pageIdx] || 0) + c.y * pageHratio;
+
                     chordEl.style.left = c.x + '%';
-                    chordEl.style.top = c.y + '%';
-                    chordEl.textContent = transposeChord(c.t, state.transpose);
+                    chordEl.style.top = absY + '%';
+                    chordEl.textContent = c.t;
                     wrapper.appendChild(chordEl);
                 });
             }
@@ -317,6 +370,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         UI.homeView.classList.add('hidden');
         UI.viewerView.classList.remove('hidden');
+        UI.viewerView.classList.toggle('fit-entire', state.displayMode === 'fit-entire');
         UI.imageCanvas.scrollTop = 0;
         UI.mainSearchInput.value = '';
         UI.searchResults.classList.add('hidden');
@@ -324,9 +378,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function closeViewer() {
+        stopMetronome(); // 뷰어를 닫을 때 메트로놈 중지
         UI.viewerView.classList.add('hidden');
         UI.homeView.classList.remove('hidden');
-        UI.transposePanel.classList.add('hidden');
         state.currentHymn = null;
         renderHymnList(); // 목록 초기화 (검색어 비워진 상태 반영)
         updateHeaderUI();
@@ -383,7 +437,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     UI.backBtn.addEventListener('click', () => {
-        history.back(); // 시스템 뒤로가기와 동일하게 동작 유도
+        closeViewer(); // 무조건 목록창으로 점프
     });
 
     function navigate(dir) {
@@ -405,23 +459,264 @@ document.addEventListener('DOMContentLoaded', () => {
     UI.closeSettings.addEventListener('click', closeMenu);
     UI.sidebarOverlay.addEventListener('click', closeMenu);
 
-    UI.transposeToggle.addEventListener('click', () => UI.transposePanel.classList.toggle('hidden'));
-    UI.closeTranspose.addEventListener('click', () => UI.transposePanel.classList.add('hidden'));
-
-    // Transpose Buttons
-    document.querySelectorAll('.t-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const dir = parseInt(btn.dataset.dir);
-            state.transpose += dir;
-            if (state.transpose > 6) state.transpose -= 12;
-            if (state.transpose < -6) state.transpose += 12;
-            
-            if (UI.transposeValue) {
-                UI.transposeValue.textContent = (state.transpose > 0 ? '+' : '') + state.transpose;
-            }
-            if (state.currentHymn) openViewer(state.currentHymn.no, true);
-        });
+    // Double-tap to toggle display mode (Fit Width / Fit Entire Score)
+    let lastTap = 0;
+    UI.imageCanvas.addEventListener('click', (e) => {
+        const currentTime = new Date().getTime();
+        const tapLength = currentTime - lastTap;
+        if (tapLength < 300 && tapLength > 0) {
+            e.preventDefault();
+            state.displayMode = state.displayMode === 'fit-width' ? 'fit-entire' : 'fit-width';
+            UI.viewerView.classList.toggle('fit-entire', state.displayMode === 'fit-entire');
+        }
+        lastTap = currentTime;
     });
+
+
+
+    // 메트로놈 오디오 및 제어 로직
+    let audioCtx = null;
+    let metroIntervalId = null;
+    let nextTickTime = 0.0;
+    const clickLength = 0.04; // seconds (crisp click)
+
+    function startMetronome() {
+        if (state.isPlayingMetro) return;
+        if (!state.tempo) return; // 템포 값이 없으면 실행하지 않음
+        
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+        
+        state.isPlayingMetro = true;
+        if (UI.metroBtn) UI.metroBtn.classList.add('active');
+        nextTickTime = audioCtx.currentTime;
+        
+        scheduler();
+    }
+
+    function stopMetronome() {
+        state.isPlayingMetro = false;
+        if (UI.metroBtn) {
+            UI.metroBtn.classList.remove('active');
+            UI.metroBtn.classList.remove('flash');
+        }
+        if (metroIntervalId) {
+            clearTimeout(metroIntervalId);
+            metroIntervalId = null;
+        }
+    }
+
+    function scheduler() {
+        if (!state.isPlayingMetro) return;
+        while (nextTickTime < audioCtx.currentTime + 0.1) {
+            scheduleClick(nextTickTime);
+            const secondsPerBeat = 60.0 / state.tempo;
+            nextTickTime += secondsPerBeat;
+        }
+        metroIntervalId = setTimeout(scheduler, 25);
+    }
+
+    function scheduleClick(time) {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        
+        osc.frequency.value = 1000; // 1000Hz 맑은 하이 톤
+        
+        gainNode.gain.setValueAtTime(1, time);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, time + clickLength);
+        
+        osc.start(time);
+        osc.stop(time + clickLength);
+
+        // 녹색 LED 깜빡임 및 테두리 반짝임 동기화 (오디오 재생 시점 예측 지연 계산)
+        const delayMs = (time - audioCtx.currentTime) * 1000;
+        setTimeout(() => {
+            if (!state.isPlayingMetro) return;
+            
+            // LED 깜빡임
+            if (UI.metroBtn) {
+                UI.metroBtn.classList.add('flash');
+                setTimeout(() => {
+                    if (state.isPlayingMetro && UI.metroBtn) {
+                        UI.metroBtn.classList.remove('flash');
+                    }
+                }, 40);
+            }
+            
+            // 화면 테두리 반짝임 (비주얼 큐 활성화 시)
+            if (state.metroVisualEnabled) {
+                const appContainer = document.getElementById('app');
+                if (appContainer) {
+                    appContainer.classList.add('metro-beat-flash');
+                    setTimeout(() => {
+                        if (appContainer) {
+                            appContainer.classList.remove('metro-beat-flash');
+                        }
+                    }, 40);
+                }
+            }
+        }, Math.max(0, delayMs));
+    }
+
+    // 메트로놈 토글 버튼 리스너
+    if (UI.metroBtn) {
+        UI.metroBtn.addEventListener('click', () => {
+            if (state.isPlayingMetro) {
+                stopMetronome();
+            } else {
+                startMetronome();
+            }
+        });
+    }
+
+    // 메트로놈 비주얼 큐 설정 변경 리스너
+    if (UI.metroVisualToggle) {
+        UI.metroVisualToggle.addEventListener('change', (e) => {
+            state.metroVisualEnabled = e.target.checked;
+            localStorage.setItem('metroVisual', state.metroVisualEnabled);
+        });
+    }
+
+    // 50단위 빠른 스크롤 슬라이딩 및 터치/드래그 제어
+    const fastScrollIndex = document.querySelector('.fast-scroll-index');
+    if (fastScrollIndex) {
+        let isDragging = false;
+        let lastTargetNo = null;
+        let startY = 0;
+        let hasMoved = false;
+        const dragThreshold = 5; // 드래그 판정 임계치 (px)
+
+        function scrollToTarget(targetNo, isSmooth = false) {
+            const items = UI.hymnList.querySelectorAll('.hymn-item');
+            let foundElement = null;
+            for (let hymnItem of items) {
+                const no = parseInt(hymnItem.dataset.no);
+                if (no >= targetNo) {
+                    foundElement = hymnItem;
+                    break;
+                }
+            }
+            const listContainer = document.querySelector('.list-container');
+            if (foundElement && listContainer) {
+                listContainer.scrollTo({
+                    top: foundElement.offsetTop,
+                    behavior: isSmooth ? 'smooth' : 'auto'
+                });
+            }
+        }
+
+        function handleGesture(clientY, isSmooth = false) {
+            const rect = fastScrollIndex.getBoundingClientRect();
+            const relativeY = clientY - rect.top;
+            const items = Array.from(fastScrollIndex.querySelectorAll('.index-item'));
+            if (items.length === 0) return;
+            
+            // 인덱스 범위 클램핑 및 비례 계산
+            const index = Math.max(0, Math.min(items.length - 1, Math.floor((relativeY / rect.height) * items.length)));
+            
+            // 활성화된 인덱스 아이템 하이라이트
+            items.forEach((item, idx) => {
+                item.classList.toggle('active', idx === index);
+            });
+
+            const targetNo = parseInt(items[index].dataset.target);
+            if (targetNo !== lastTargetNo) {
+                lastTargetNo = targetNo;
+                scrollToTarget(targetNo, isSmooth);
+            }
+        }
+
+        function clearHighlight() {
+            const items = fastScrollIndex.querySelectorAll('.index-item');
+            items.forEach(item => item.classList.remove('active'));
+        }
+
+        // 터치 제어 (모바일 기기용)
+        fastScrollIndex.addEventListener('touchstart', (e) => {
+            isDragging = true;
+            hasMoved = false;
+            const touch = e.touches[0];
+            startY = touch.clientY;
+            handleGesture(touch.clientY, false);
+            e.preventDefault(); // 스크롤바 탭 시 전체 화면 스크롤링 및 풀-투-리프레시 오작동 차단
+        }, { passive: false });
+
+        fastScrollIndex.addEventListener('touchmove', (e) => {
+            if (!isDragging) return;
+            const touch = e.touches[0];
+            if (Math.abs(touch.clientY - startY) > dragThreshold) {
+                hasMoved = true;
+            }
+            handleGesture(touch.clientY, false);
+            e.preventDefault();
+        }, { passive: false });
+
+        fastScrollIndex.addEventListener('touchend', (e) => {
+            if (isDragging) {
+                isDragging = false;
+                lastTargetNo = null;
+                // 드래그가 일어나지 않은 단순 탭(터치)일 경우 부드러운 스크롤 제공
+                if (!hasMoved) {
+                    const touch = e.changedTouches[0];
+                    const rect = fastScrollIndex.getBoundingClientRect();
+                    const relativeY = touch.clientY - rect.top;
+                    const items = Array.from(fastScrollIndex.querySelectorAll('.index-item'));
+                    if (items.length > 0) {
+                        const index = Math.max(0, Math.min(items.length - 1, Math.floor((relativeY / rect.height) * items.length)));
+                        const targetNo = parseInt(items[index].dataset.target);
+                        scrollToTarget(targetNo, true);
+                    }
+                }
+                clearHighlight();
+            }
+        });
+
+        // 마우스 드래그 제어 (데스크톱 및 브라우저 에뮬레이터 테스트용)
+        fastScrollIndex.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            hasMoved = false;
+            startY = e.clientY;
+            handleGesture(e.clientY, false);
+            e.preventDefault();
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            if (Math.abs(e.clientY - startY) > dragThreshold) {
+                hasMoved = true;
+            }
+            handleGesture(e.clientY, false);
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                lastTargetNo = null;
+                clearHighlight();
+            }
+        });
+
+        // 클릭 리스너 (드래그하지 않고 단발적으로 마우스를 꾹 눌렀다 뗄 때 부드러운 스크롤 처리)
+        fastScrollIndex.addEventListener('click', (e) => {
+            if (hasMoved) {
+                e.preventDefault();
+                return;
+            }
+            const item = e.target.closest('.index-item');
+            if (item) {
+                const targetNo = parseInt(item.dataset.target);
+                scrollToTarget(targetNo, true);
+            }
+        });
+    }
 
     init();
 });
