@@ -478,24 +478,30 @@ document.addEventListener('DOMContentLoaded', () => {
     let audioCtx = null;
     let metroIntervalId = null;
     let nextTickTime = 0.0;
-    const clickLength = 0.04; // seconds (crisp click)
+    let beatQueue = [];     // 정밀 오디오 클럭 기준으로 예약된 비트 시점들 (초)
+    let metroRafId = null;
+    const SCHEDULE_AHEAD = 0.1; // seconds (앞서 예약할 시간 창)
+    const SCHEDULER_INTERVAL = 25; // ms (스케줄러 점검 주기)
 
     function startMetronome() {
         if (state.isPlayingMetro) return;
         if (!state.tempo) return; // 템포 값이 없으면 실행하지 않음
-        
+
+        // 소리는 내지 않지만 정밀한 타이밍 클럭으로 AudioContext.currentTime 을 사용
         if (!audioCtx) {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         }
         if (audioCtx.state === 'suspended') {
             audioCtx.resume();
         }
-        
+
         state.isPlayingMetro = true;
         if (UI.metroBtn) UI.metroBtn.classList.add('active');
         nextTickTime = audioCtx.currentTime;
-        
+        beatQueue = [];
+
         scheduler();
+        metroRafId = requestAnimationFrame(draw);
     }
 
     function stopMetronome() {
@@ -508,62 +514,60 @@ document.addEventListener('DOMContentLoaded', () => {
             clearTimeout(metroIntervalId);
             metroIntervalId = null;
         }
+        if (metroRafId) {
+            cancelAnimationFrame(metroRafId);
+            metroRafId = null;
+        }
+        beatQueue = [];
     }
 
     function scheduler() {
         if (!state.isPlayingMetro) return;
-        while (nextTickTime < audioCtx.currentTime + 0.1) {
-            scheduleClick(nextTickTime);
+        // 다가오는 비트 시점들을 오디오 클럭 기준으로 큐에 예약
+        while (nextTickTime < audioCtx.currentTime + SCHEDULE_AHEAD) {
+            beatQueue.push(nextTickTime);
             const secondsPerBeat = 60.0 / state.tempo;
             nextTickTime += secondsPerBeat;
         }
-        metroIntervalId = setTimeout(scheduler, 25);
+        metroIntervalId = setTimeout(scheduler, SCHEDULER_INTERVAL);
     }
 
-    function scheduleClick(time) {
-        if (!audioCtx) return;
-        const osc = audioCtx.createOscillator();
-        const gainNode = audioCtx.createGain();
-        
-        osc.connect(gainNode);
-        gainNode.connect(audioCtx.destination);
-        
-        osc.frequency.value = 1000; // 1000Hz 맑은 하이 톤
-        
-        gainNode.gain.setValueAtTime(1, time);
-        gainNode.gain.exponentialRampToValueAtTime(0.001, time + clickLength);
-        
-        osc.start(time);
-        osc.stop(time + clickLength);
+    // requestAnimationFrame 루프가 정밀 오디오 클럭과 비교해 비트 시점에 시각 큐를 발화
+    function draw() {
+        if (!state.isPlayingMetro) return;
+        const now = audioCtx.currentTime;
+        while (beatQueue.length && beatQueue[0] <= now) {
+            beatQueue.shift();
+            flashBeat();
+        }
+        metroRafId = requestAnimationFrame(draw);
+    }
 
-        // 녹색 LED 깜빡임 및 테두리 반짝임 동기화 (오디오 재생 시점 예측 지연 계산)
-        const delayMs = (time - audioCtx.currentTime) * 1000;
-        setTimeout(() => {
-            if (!state.isPlayingMetro) return;
-            
-            // LED 깜빡임
-            if (UI.metroBtn) {
-                UI.metroBtn.classList.add('flash');
+    function flashBeat() {
+        if (!state.isPlayingMetro) return;
+
+        // LED 깜빡임
+        if (UI.metroBtn) {
+            UI.metroBtn.classList.add('flash');
+            setTimeout(() => {
+                if (state.isPlayingMetro && UI.metroBtn) {
+                    UI.metroBtn.classList.remove('flash');
+                }
+            }, 40);
+        }
+
+        // 화면 테두리 반짝임 (비주얼 큐 활성화 시)
+        if (state.metroVisualEnabled) {
+            const appContainer = document.getElementById('app');
+            if (appContainer) {
+                appContainer.classList.add('metro-beat-flash');
                 setTimeout(() => {
-                    if (state.isPlayingMetro && UI.metroBtn) {
-                        UI.metroBtn.classList.remove('flash');
+                    if (appContainer) {
+                        appContainer.classList.remove('metro-beat-flash');
                     }
                 }, 40);
             }
-            
-            // 화면 테두리 반짝임 (비주얼 큐 활성화 시)
-            if (state.metroVisualEnabled) {
-                const appContainer = document.getElementById('app');
-                if (appContainer) {
-                    appContainer.classList.add('metro-beat-flash');
-                    setTimeout(() => {
-                        if (appContainer) {
-                            appContainer.classList.remove('metro-beat-flash');
-                        }
-                    }, 40);
-                }
-            }
-        }, Math.max(0, delayMs));
+        }
     }
 
     // 메트로놈 토글 버튼 리스너
